@@ -52,7 +52,6 @@ bool cv::LocalizationSystem::localize(const cv::Mat& image, int attempts) {
 }
 
      
-/* TODO: use cv::eigen */
 cv::Vec3f cv::LocalizationSystem::eigen(double data[]) const
 {
 	gsl_matrix_view m = gsl_matrix_view_array (data, 3, 3);
@@ -241,22 +240,19 @@ bool cv::LocalizationSystem::set_axis(const cv::Mat& image, const std::string& f
     b.at<double>(2 * i + 1) = -targets[i](1);
   }
 
-  // solve linear system and obtain transformation
+  // TODO: resolver sistema de ecuaciones lineales
   cv::solve(A, b, x);
   x.push_back(1.0);
   coordinates_transform = x.reshape(1, 3);
   cout << "H " << coordinates_transform << endl;
 
-  // TODO: compare H obtained by OpenCV with the hand approach
   std::vector<cv::Vec2f> src(4), dsts(4);
   for (int i = 0; i < 4; i++) {
     src[i] = tmp[i];
     dsts[i] = targets[i];
     cout << tmp[i] << " -> " << targets[i] << endl;
   }
-  cv::Matx33f H = cv::findHomography(src, dsts, CV_LMEDS);
-  cout << "OpenCV H " << H << endl;
-
+  
   if (!file.empty()) {
     cv::FileStorage fs(file, cv::FileStorage::WRITE);
     fs << "H" << cv::Mat(cv::Matx33d(coordinates_transform)); // store as double to get more decimals

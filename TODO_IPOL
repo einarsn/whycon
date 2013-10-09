@@ -1,0 +1,14 @@
+TODO
+====
+
+Lista de todas las cosas a hacer y funcionalidad a reemplazar:
+
+* Mat de OpenCV a una Mat propia (ver Mat.h)
+* Vec3f y similares de OpenCV a una Vector propia (ver Vector.h)
+* reemplazar toda la carga, escritura y manejo de imagenes usando libpng -> reemplazar funciones imread e imwrite por propias
+    - la idea es que imread use libpng para creat un mat e imwrite para escribir un mat (tal como en OpenCV)
+* Actualmente la libreria dibuja el resultado de la deteccion en la imagen actual y uno puede guardarla y verla luego
+  - Habria que ver cuan complicado es mantener esta funcionalidad, quizas usando un codigo basico de dibujado de algun lado
+
+* documentar todo lo mas posible
+* reescribir el README.md  para que se refiera a la version actual

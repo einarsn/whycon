@@ -1,237 +1,102 @@
-#include <opencv2/opencv.hpp>
-#include <opencv2/highgui/highgui.hpp>
 #include <iostream>
 #include <fstream>
-#include <iomanip>
+#include <list>
 #include <string>
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
-#include <boost/program_options.hpp>
 #include "localization_system.h"
-#include "localization_viewer.h"
-#include "localization_service.h"
 using namespace std;
-namespace po = boost::program_options;
 
 bool stop = false;
 void interrupt(int s) {
   stop = true;
 }
 
-bool clicked = false;
-void mouse_callback(int event, int x, int y, int flags, void* param) {
-  if (event == CV_EVENT_LBUTTONDOWN) { cout << "clicked window" << endl; clicked = true; }
-}
-
-bool do_tracking;
-bool use_gui;
-int number_of_targets;
-
-po::variables_map process_commandline(int argc, char** argv)
-{
-  po::options_description options_description("WhyCon options");
-  options_description.add_options()
-    ("help,h", "display this help")
-    
-    ("set-axis,s", po::value<string>(), "perform axis detection and save results to specified XML file")
-    ("track,t", po::value<int>(), "perform tracking of the specified ammount of targets")
-    
-    ("cam,c", po::value<int>(), "use camera as input (expects id of camera)")
-    ("video,v", po::value<string>(), "use video as input (expects path to video file)")
-    ("img,i", po::value<string>(), "use sequence of images as input (expects pattern describing sequence)"
-                                      "Use a pattern such as 'directory/%03d.png' for files named 000.png to "
-                                      "999.png inside said directory")
-
-    ("output,o", po::value<string>(), "name to be used for all tracking output files")
-    
-    ("axis,a", po::value<string>(), "use specified XML file for axis definition during tracking")
-    
-    ("mat,m", po::value<string>(), "use specified matlab (.m) calibration toolbox file for camera calibration parameters")
-    ("xml,x", po::value<string>(), "use specified 'camera_calibrator' file (.xml) for camera calibration parameters")
-    ("service", "run as a mavconn service, outputting pose information through bus")
-    
-    ("no-gui,n", "disable opening of GUI")
-  ;
-
-
-  po::variables_map config_vars;
-  try {
-    po::store(po::parse_command_line(argc, argv, options_description), config_vars);
-    if (config_vars.count("help")) { cerr << options_description << endl; exit(1); }
-
-    po::notify(config_vars);
-    
-    if (config_vars.count("track")) do_tracking = true;
-    else if (config_vars.count("set-axis")) do_tracking = false;
-    else throw std::runtime_error("Select either tracking or axis setting mode");
-    
-    if (!config_vars.count("mat") && !config_vars.count("xml"))
-      throw std::runtime_error("Please specify one source for calibration parameters");
-      
-    if (!config_vars.count("cam") && !config_vars.count("video") && !config_vars.count("img"))
-      throw std::runtime_error("Please specify one input source");
-
-    use_gui = !config_vars.count("no-gui");
-
-    if (do_tracking) {
-      if (!config_vars.count("output")) throw std::runtime_error("Specify output name of files");
-      if (config_vars["track"].as<int>() < 0) throw std::runtime_error("Number of circles to track should be greater than 0");
-      if (!config_vars.count("axis")) throw std::runtime_error("Axis definition file is required for tracking");
-      
-      number_of_targets = config_vars["track"].as<int>();
-    }
-    else {
-      if (config_vars.count("video")) throw std::runtime_error("Video input is not supported for axis definition");
-      if (!use_gui && config_vars.count("cam")) throw std::runtime_error("Camera input is not supported for axis setting when GUI is disabled");
-      if (config_vars.count("service")) throw std::runtime_error("Running as service is only for tracking mode");
-    }
-  }
-  catch(const std::runtime_error& e) {
-    cerr << options_description << endl << endl;
-    cerr << "ERROR: " << e.what() << endl;
-    exit(1);
-  }
-  catch(po::error& e) { 
-    cerr << options_description << endl << endl;
-    cerr << endl << "ERROR: " << e.what() << endl;
-    exit(1);
-  }   
-  return config_vars;
-}
-
-
 int main(int argc, char** argv)
 {
   signal(SIGINT, interrupt);
 
   /* process command line */
-  po::variables_map config_vars = process_commandline(argc, argv);
+  if (argc < 6 || string(argv[1]) == "-h")
+  {
+    cout << "localization-system: [number of circles to detect] [calibration file] [axis definition PNG file] [PNG images directory] [output directory]" << endl;
+    return 1;
+  }
 
-  /* setup input */
-  bool is_camera = config_vars.count("cam");
-  cv::VideoCapture capture;
-  if (is_camera) {
-    int cam_id = config_vars["cam"].as<int>();
-    capture.open(cam_id);
-  }
-  else {
-    std::string video_name(config_vars.count("img") ? config_vars["img"].as<string>() : config_vars["video"].as<string>());
-    capture.open(video_name);    
-  }
-  if (!capture.isOpened()) { cout << "error opening camera/video" << endl; return 1; }
+  int circles = atoi(argv[1]);
+  string calibration_file(argv[2]);
+  string axis_file(argv[3]);
+  string input_directory(argv[4]);
+  string output_directory(argv[5]);
+
+  /* create output directory */
+  if (mkdir(output_directory.c_str(), 0755) == -1)
+    throw std::runtime_error(string("could not create output directory: ") + strerror(errno));
 
   /* load calibration */
-  cv::Mat K, dist_coeff;
-  if (config_vars.count("xml"))
-    cv::LocalizationSystem::load_opencv_calibration(config_vars["xml"].as<string>(), K, dist_coeff);
-  else
-    cv::LocalizationSystem::load_matlab_calibration(config_vars["mat"].as<string>(), K, dist_coeff);
+  cv::Mat K, dist_coeff; // TODO: reemplazar
+  // TODO: esto se puede reemplaar por una funcion propia que lea el archvo y llene las matrices
+  cv::LocalizationSystem::load_matlab_calibration(calibration_file, K, dist_coeff);
 
-  /* init system */
-  cv::Size frame_size(capture.get(CV_CAP_PROP_FRAME_WIDTH), capture.get(CV_CAP_PROP_FRAME_HEIGHT));
-  cv::LocalizationSystem system(number_of_targets, frame_size.width, frame_size.height, K, dist_coeff);
+  /* initialize system */
+  int width = 0; // TODO: leer desde imagen
+  int height = 0; 
+  cv::LocalizationSystem system(circles, width, height, K, dist_coeff);
 
-  #ifdef ENABLE_VIEWER
-  cv::LocalizationViewer viewer(system);
-  if (use_gui) viewer.start();
-  #endif
+  /* create output data file */
+  ofstream output_log((output_directory + "/positions.txt").c_str(), ios_base::out | ios_base::trunc);
+  if (!output_log) throw std::runtime_error("error creating output data file");
 
-  #ifdef ENABLE_MAVCONN
-  bool run_service = config_vars.count("service");
-  cv::LocalizationService service(system);
-  if (run_service) service.start();
-  #endif
+  /* read axis definition file */
+  cv::Mat frame = cv::imread(axis_definition_file.c_str()); // TODO: reemplazar
+  system.set_axis(frame);
+  system.draw_axis(frame);
+  cv::imwrite(output_directory + "/axis_detected.png", frame); // TODO: reemplazar (o sacar funcionalidad)
 
-  /* setup gui */
-  if (use_gui) {
-    cvStartWindowThread();
-    cv::namedWindow("output", CV_WINDOW_NORMAL);
-    cv::setMouseCallback("output", mouse_callback);
-  }
-
-  /* set tracking output */
-  std::string output_name;
-  cv::VideoWriter video_writer;
-  ofstream data_file;
-  if (do_tracking) {
-    output_name = config_vars["output"].as<string>();
-    video_writer.open(output_name + ".avi", CV_FOURCC('M','J','P','G'), 15, frame_size);
-    if (!video_writer.isOpened()) throw std::runtime_error("error opening output video");
-    data_file.open((output_name + ".log").c_str(), ios_base::out | ios_base::trunc);
-    if (!data_file) throw std::runtime_error(string("error opening '") + output_name + ".log' output data file");
-  }
+  /* reads input image names */
+  list<string> image_names;
+  glob_t g;
+  glob(input_directory + "/*.png", 0, NULL, &g);
+  int image_count = g->gl_pathc;
+  if (image_count == 0) throw std::runtime_error("no input images found in directory");
   
-  /* setup gui and start capturing / processing */
-  bool is_tracking = false;
-  if (!is_camera) clicked = true; // when not using camera, emulate user click so that tracking starts immediately
-  cv::Mat original_frame, frame;
-  int saved_frame_idx = 0;
+  for (char** ptr = gl->gl_pathv, ptr, ptr++) image_names.push_back(*ptr);
+  globfree(&g);
 
-  /* read axis from file when in tracking mode */
-  if (do_tracking)
-    system.read_axis(config_vars["axis"].as<string>());
-
-  while (!stop)
-  {
-    if (!capture.read(original_frame)) { cout << "no more frames left to read" << endl; break; }
-    original_frame.copyTo(frame);
-
-    if (!do_tracking) {
-      if (!is_camera || clicked) {
-        bool axis_was_set = system.set_axis(original_frame, config_vars["set-axis"].as<string>());
-        if (!axis_was_set) throw std::runtime_error("Error setting axis!");      
-        system.draw_axis(frame);
-        cv::imwrite(output_name + "_axis_detected.png", frame);
-        stop = true;
-      }
-      if (use_gui) cv::imshow("output", frame);
-    }
+  int frame_count = 0;
+  bool initialized = false;
+  while (!stop && !image_names.empty()) {
+    string image_name = image_names.front();
+    image_names.pop_front();
+    
+    // TODO: leer imagen actual aca y ponerla en frame
+    
+    if (!initialized)
+      initialized = system.initialize(frame); // find circles in image
     else {
-      if (!is_tracking && (!use_gui || clicked)) {
-        clicked = false;
-        is_tracking = true;
-        cout << "initialization" << endl;
-        system.initialize(original_frame); // find circles in image      
-      }
+      bool localized_ok = system.localize(frame, 50);
       
-      // localize and draw circles
-      if (is_tracking) {
-        cout << "tracking current frame" << endl;
-        bool localized_correctly = system.localize(original_frame, (is_camera ? 1 : 50)); // track detected circles and localize
-        
-        if (localized_correctly) {
-          for (int i = 0; i < number_of_targets; i++) {
-            const cv::CircleDetector::Circle& circle = system.get_circle(i);
-            cv::Vec3f coord = system.get_pose(circle).pos;
-            cv::Vec3f coord_trans = system.get_transformed_pose(circle).pos;
-            ostringstream ostr;
-            ostr << fixed << setprecision(2) << "[" << coord_trans(0) << "," << coord_trans(1) << "]";
-            ostr << i;
-            if (use_gui) circle.draw(frame, ostr.str(), cv::Scalar(255,255,0));
-            data_file << setprecision(15) << "frame " << saved_frame_idx << " circle " << i
-              << " transformed: " << coord_trans(0) << " " << coord_trans(1) << " " << coord_trans(2)
-              << " original: " << coord(0) << " " << coord(1) << " " << coord(2) << endl;
-            saved_frame_idx++;
-          }
-          #ifdef ENABLE_VIEWER
-          if (use_gui) viewer.update();
-          #endif
-          #ifdef ENABLE_MAVCONN
-          if (run_service) service.publish();
-          #endif    
+      if (localized_ok) {
+        for (int i = 0; i < circles; i++)
+        {
+          const cv::CircleDetector::Circle& circle = system.get_circle(i);
+          cv::Vec3f coord = system.get_pose(circle).pos;
+          cv::Vec3f coord_trans = system.get_transformed_pose(circle).pos;
+          ostringstream ostr;
+          ostr << fixed << setprecision(2) << "[" << coord_trans(0) << "," << coord_trans(1) << "]";
+          ostr << i;
+          output_file << setprecision(15) << "frame " << frame_count << " circle " << i
+            << " transformed: " << coord_trans(0) << " " << coord_trans(1) << " " << coord_trans(2)
+            << " original: " << coord(0) << " " << coord(1) << " " << coord(2) << endl;
+          // TODO: draw output of localization here? -> save into file in output directory
         }
-
-        video_writer << frame;
       }
-      if (use_gui) cv::imshow("output", frame);
     }
+    frame_count++;
   }
 
-  /*#ifdef ENABLE_VIEWER
-  if (!stop) viewer.wait();
-  #endif*/
   return 0;
 }
 

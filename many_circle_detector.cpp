@@ -16,8 +16,6 @@ bool cv::ManyCircleDetector::initialize(const cv::Mat& image) {
   cv::Mat marked_image;
   image.copyTo(marked_image);
 
-  /*cv::namedWindow("marked", CV_WINDOW_NORMAL);
-  cv::namedWindow("buffer", CV_WINDOW_NORMAL);*/
   int attempts = 100;
   for (int i = 0; i < number_of_circles; i++) {
     detectors[i].draw = true;
@@ -25,9 +23,6 @@ bool cv::ManyCircleDetector::initialize(const cv::Mat& image) {
       int64_t ticks = cv::getTickCount();
       cout << "detecting circle " << i << " attempt " << j << endl;
       circles[i] = detectors[i].detect(marked_image, (i != 0 ? circles[i - 1] : CircleDetector::Circle()));
-      /*cv::imshow("marked", marked_image);
-      cv::Mat buffer_img;
-      cv::waitKey();*/
       double delta = (double)(cv::getTickCount() - ticks) / cv::getTickFrequency();
       cout << "t: " << delta << " " << " fps: " << 1/delta << endl;
       if (circles[i].valid) break;
@@ -56,24 +51,3 @@ bool cv::ManyCircleDetector::detect(const cv::Mat& image) {
   return all_detected;
 }
 
-/*bool cv::ManyCircleDetector::localize_parallel(const cv::Mat& image) {
-  static tbb::affinity_partitioner ap;
-  tbb::parallel_for(tbb::blocked_range<int>(0, number_of_circles, 8), Functor(*this, image), ap);
-  // TODO: check if all_detected
-}*/
-
-#if 0
-cv::ManyCircleDetector::Functor::Functor(cv::ManyCircleDetector& _detector, const cv::Mat& _image) : image(_image), detector(_detector), circles(_detector.circles), detectors(_detector.detectors)
-{
-}
-
-void cv::ManyCircleDetector::Functor::operator()(tbb::blocked_range<int>& r) const
-{
-  for (int i = r.begin(); i != r.end(); i++) {
-    //int64_t ticks = cv::getTickCount();
-    circles[i] = detectors[i].detect(image, circles[i]); // TODO: modify current
-    //double delta = (double)(cv::getTickCount() - ticks) / cv::getTickFrequency();
-    //cout << "tinner: " << delta << " " << " fps: " << 1/delta << endl;
-  }
-}
-#endif
