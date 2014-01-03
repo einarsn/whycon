@@ -18,7 +18,7 @@ namespace cv {
       
     private:
       int width, height, number_of_circles;
-      std::vector<CircleDetector> detectors;
+      //std::vector<CircleDetector> detectors;
   };
 }
 
